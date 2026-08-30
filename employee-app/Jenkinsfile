@@ -1,12 +1,13 @@
 pipeline {
-
     agent any
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REPO = '298713974325.dkr.ecr.us-east-1.amazonaws.com/employee-app'
-        IMAGE_NAME = 'employee-app'
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        AWS_ACCOUNT_ID = '298713974325'
+
+        ECR_REPOSITORY = 'employee-app'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_NAME = "${ECR_REGISTRY}/${ECR_REPOSITORY}"
 
         ECS_CLUSTER = 'employee-app-cluster'
         ECS_SERVICE = 'employee-app-service'
@@ -20,15 +21,36 @@ pipeline {
             }
         }
 
+        stage('Environment Check') {
+            steps {
+                bat '''
+                    echo ===== JAVA =====
+                    java -version
+
+                    echo ===== MAVEN =====
+                    mvnw.cmd --version
+
+                    echo ===== DOCKER =====
+                    docker --version
+
+                    echo ===== AWS =====
+                    aws --version
+
+                    echo ===== TRIVY =====
+                    trivy --version
+                '''
+            }
+        }
+
         stage('Build') {
             steps {
-                bat 'mvn clean package -DskipTests'
+                bat 'mvnw.cmd clean package -DskipTests'
             }
         }
 
         stage('Test') {
             steps {
-                bat 'mvn test'
+                bat 'mvnw.cmd test'
             }
         }
 
@@ -40,43 +62,93 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                bat 'docker build -t %IMAGE_NAME%:%IMAGE_TAG% .'
+                bat '''
+                    docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .
+                    docker tag %IMAGE_NAME%:%BUILD_NUMBER% %IMAGE_NAME%:latest
+                '''
             }
         }
 
         stage('Docker Scan') {
             steps {
-                bat 'trivy image %IMAGE_NAME%:%IMAGE_TAG%'
+                bat 'trivy image %IMAGE_NAME%:%BUILD_NUMBER%'
+            }
+        }
+
+        stage('AWS Authentication') {
+            steps {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-devsecops']
+                ]) {
+                    bat 'aws sts get-caller-identity'
+                }
             }
         }
 
         stage('ECR Login') {
             steps {
-                bat '''
-                aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin %ECR_REPO%
-                '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-devsecops']
+                ]) {
+                    bat '''
+                        aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin %ECR_REGISTRY%
+                    '''
+                }
             }
         }
 
         stage('Push to ECR') {
             steps {
-                bat '''
-                docker tag %IMAGE_NAME%:%IMAGE_TAG% %ECR_REPO%:%IMAGE_TAG%
-                docker push %ECR_REPO%:%IMAGE_TAG%
-                '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-devsecops']
+                ]) {
+                    bat '''
+                        docker push %IMAGE_NAME%:%BUILD_NUMBER%
+                        docker push %IMAGE_NAME%:latest
+                    '''
+                }
             }
         }
 
         stage('Deploy to ECS') {
             steps {
-                bat '''
-                aws ecs update-service ^
-                  --cluster %ECS_CLUSTER% ^
-                  --service %ECS_SERVICE% ^
-                  --force-new-deployment ^
-                  --region %AWS_REGION%
-                '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-devsecops']
+                ]) {
+                    bat '''
+                        aws ecs update-service ^
+                          --cluster %ECS_CLUSTER% ^
+                          --service %ECS_SERVICE% ^
+                          --force-new-deployment ^
+                          --region %AWS_REGION%
+                    '''
+                }
             }
+        }
+    }
+
+    post {
+        success {
+            echo '========================================'
+            echo ' Jenkins Pipeline SUCCESS'
+            echo ' Docker image pushed to ECR'
+            echo ' ECS deployment triggered'
+            echo '========================================'
+        }
+
+        failure {
+            echo '========================================'
+            echo ' Jenkins Pipeline FAILED'
+            echo ' Check the stage logs above'
+            echo '========================================'
+        }
+
+        always {
+            bat 'docker image prune -f'
         }
     }
 }

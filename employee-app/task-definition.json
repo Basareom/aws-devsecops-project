@@ -1,0 +1,21 @@
+{
+  "family": "employee-app",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::298713974325:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "employee-app",
+      "image": "298713974325.dkr.ecr.us-east-1.amazonaws.com/employee-app:1.4",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8081,
+          "protocol": "tcp"
+        }
+      ]
+    }
+  ]
+}
