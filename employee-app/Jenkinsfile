@@ -23,49 +23,59 @@ pipeline {
 
         stage('Environment Check') {
             steps {
-                bat '''
-                    echo ===== JAVA =====
-                    java -version
+                dir('employee-app') {
+                    bat '''
+                        echo ===== JAVA =====
+                        java -version
 
-                    echo ===== MAVEN =====
-                    mvnw.cmd --version
+                        echo ===== MAVEN =====
+                        mvnw.cmd --version
 
-                    echo ===== DOCKER =====
-                    docker --version
+                        echo ===== DOCKER =====
+                        docker --version
 
-                    echo ===== AWS =====
-                    aws --version
+                        echo ===== AWS =====
+                        aws --version
 
-                    echo ===== TRIVY =====
-                    trivy --version
-                '''
+                        echo ===== TRIVY =====
+                        trivy --version
+                    '''
+                }
             }
         }
 
         stage('Build') {
             steps {
-                bat 'mvnw.cmd clean package -DskipTests'
+                dir('employee-app') {
+                    bat 'mvnw.cmd clean package -DskipTests'
+                }
             }
         }
 
         stage('Test') {
             steps {
-                bat 'mvnw.cmd test'
+                dir('employee-app') {
+                    bat 'mvnw.cmd test'
+                }
             }
         }
 
         stage('Trivy Filesystem Scan') {
             steps {
-                bat 'trivy fs .'
+                dir('employee-app') {
+                    bat 'trivy fs .'
+                }
             }
         }
 
         stage('Docker Build') {
             steps {
-                bat '''
-                    docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .
-                    docker tag %IMAGE_NAME%:%BUILD_NUMBER% %IMAGE_NAME%:latest
-                '''
+                dir('employee-app') {
+                    bat '''
+                        docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .
+                        docker tag %IMAGE_NAME%:%BUILD_NUMBER% %IMAGE_NAME%:latest
+                    '''
+                }
             }
         }
 
