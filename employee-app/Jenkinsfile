@@ -1,0 +1,82 @@
+pipeline {
+
+    agent any
+
+    environment {
+        AWS_REGION = 'us-east-1'
+        ECR_REPO = '298713974325.dkr.ecr.us-east-1.amazonaws.com/employee-app'
+        IMAGE_NAME = 'employee-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        ECS_CLUSTER = 'employee-app-cluster'
+        ECS_SERVICE = 'employee-app-service'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                bat 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                bat 'mvn test'
+            }
+        }
+
+        stage('Trivy Filesystem Scan') {
+            steps {
+                bat 'trivy fs .'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                bat 'docker build -t %IMAGE_NAME%:%IMAGE_TAG% .'
+            }
+        }
+
+        stage('Docker Scan') {
+            steps {
+                bat 'trivy image %IMAGE_NAME%:%IMAGE_TAG%'
+            }
+        }
+
+        stage('ECR Login') {
+            steps {
+                bat '''
+                aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin %ECR_REPO%
+                '''
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                bat '''
+                docker tag %IMAGE_NAME%:%IMAGE_TAG% %ECR_REPO%:%IMAGE_TAG%
+                docker push %ECR_REPO%:%IMAGE_TAG%
+                '''
+            }
+        }
+
+        stage('Deploy to ECS') {
+            steps {
+                bat '''
+                aws ecs update-service ^
+                  --cluster %ECS_CLUSTER% ^
+                  --service %ECS_SERVICE% ^
+                  --force-new-deployment ^
+                  --region %AWS_REGION%
+                '''
+            }
+        }
+    }
+}
